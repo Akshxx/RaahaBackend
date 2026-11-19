@@ -1,0 +1,76 @@
+{
+  "model_name": "RAaHA Route Preference Model",
+  "model_version": "1.1.0-prototype",
+  "algorithm": "RandomForestRegressor (MultiOutput)",
+  "n_samples": 2400,
+  "train_size": 1920,
+  "test_size": 480,
+  "feature_columns": [
+    "duration_minutes",
+    "cost_inr",
+    "distance_km",
+    "transfers",
+    "walking_meters",
+    "waiting_minutes",
+    "mode_count",
+    "comfort_index",
+    "crowding_estimate",
+    "route_complexity",
+    "safety_proxy",
+    "verified_provider_ratio",
+    "paid_changes",
+    "mode_hierarchy_score",
+    "rupees_per_minute"
+  ],
+  "target_columns": [
+    "score_fastest",
+    "score_cheapest",
+    "score_comfortable",
+    "score_safest"
+  ],
+  "data_note": "Training used synthetic/simulated journey scenarios only. Metrics describe prototype fit quality, not real-world accuracy.",
+  "train": {
+    "score_fastest": {
+      "mae": 0.012176716990705121,
+      "rmse": 0.015662132695239705,
+      "r2": 0.9878344306602913
+    },
+    "score_cheapest": {
+      "mae": 0.011673627836557473,
+      "rmse": 0.015303636891265932,
+      "r2": 0.9920836744046178
+    },
+    "score_comfortable": {
+      "mae": 0.013287892551216563,
+      "rmse": 0.016933339989676204,
+      "r2": 0.9866982413505345
+    },
+    "score_safest": {
+      "mae": 0.013285802942572953,
+      "rmse": 0.016889332880290323,
+      "r2": 0.9864001418225682
+    }
+  },
+  "test": {
+    "score_fastest": {
+      "mae": 0.026570130479536103,
+      "rmse": 0.033804439850892265,
+      "r2": 0.9442254183882345
+    },
+    "score_cheapest": {
+      "mae": 0.0241348893009201,
+      "rmse": 0.030707800854803558,
+      "r2": 0.9716908633790459
+    },
+    "score_comfortable": {
+      "mae": 0.027858548418388262,
+      "rmse": 0.03507180513194272,
+      "r2": 0.9456717155658403
+    },
+    "score_safest": {
+      "mae": 0.026207058488489286,
+      "rmse": 0.03280633556292293,
+      "r2": 0.9442575691845175
+    }
+  }
+}
