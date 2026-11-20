@@ -18,40 +18,22 @@ logger = logging.getLogger("raaha.planner")
 
 def plan_journey(request: JourneyRequest) -> dict[str, Any]:
     """Legacy endpoint helper — returns ranked routes."""
-    preferences = list(PREFERENCE_KEYS)
-    if request.preference in PREFERENCE_KEYS:
-        preferences = [request.preference] + [p for p in PREFERENCE_KEYS if p != request.preference]
-    elif request.preference == "balanced":
-        preferences = list(PREFERENCE_KEYS)
-
     ml_request = MLJourneyRequest(
         origin=request.origin,
         destination=request.destination,
-        preferences=preferences,  # type: ignore[arg-type]
     )
     result = plan_journey_ml(ml_request)
-
-    preferred = request.preference if request.preference in result["recommendations"] else "fastest"
-    ordered = []
-    if preferred in result["recommendations"]:
-        ordered.append(result["recommendations"][preferred])
-    for key in PREFERENCE_KEYS:
-        option = result["recommendations"].get(key)
-        if option and option not in ordered:
-            ordered.append(option)
 
     return {
         "status": "success",
         "origin": result["origin"],
         "destination": result["destination"],
         "preference": request.preference,
-        "routes": ordered,
+        "routes": result["routes"],
         "data_source": "Nominatim + provider registry + deterministic ranker",
         "model_used": result.get("ml_assist_enabled", False),
         "model_name": result["model_name"],
         "model_version": result["model_version"],
-        "recommendations": result["recommendations"],
-        "candidate_routes": result["candidate_routes"],
         "data_quality": result["data_quality"],
         "provider_status": result.get("provider_status"),
     }
@@ -59,10 +41,9 @@ def plan_journey(request: JourneyRequest) -> dict[str, Any]:
 
 def plan_journey_ml(request: MLJourneyRequest) -> dict[str, Any]:
     logger.info(
-        "Journey request received origin=%r destination=%r preferences=%s",
+        "Journey request received origin=%r destination=%r",
         request.origin,
         request.destination,
-        request.preferences,
     )
 
     try:
@@ -92,18 +73,58 @@ def plan_journey_ml(request: MLJourneyRequest) -> dict[str, Any]:
     predictor = get_predictor()
     predictor.ensure_loaded()  # optional ML — never hard-fails planning
 
-    preferences = [p for p in request.preferences if p in PREFERENCE_KEYS] or list(PREFERENCE_KEYS)
-    ranked = predictor.rank_recommendations(candidates, preferences=preferences)
-    recommendations = {
-        key: _to_option(value) for key, value in ranked["recommendations"].items()
-    }
-    candidate_routes = [_to_option(item) for item in ranked["candidate_routes"]]
+    # Always rank all three preferences so every route can be fully labelled.
+    all_preferences = list(PREFERENCE_KEYS)
+    ranked = predictor.rank_recommendations(candidates, preferences=all_preferences)
+    recommendations_raw = ranked["recommendations"]   # {pref: raw_dict}
+    candidate_routes_raw = ranked["candidate_routes"]
+
     provider_status = quality.get("provider_status") or get_registry().status_summary()
 
+    # Build a label map: route name → list of labels it won
+    _LABEL_MAP = {
+        "cheapest": "Cheapest",
+        "comfortable": "Most Comfortable",
+        "fastest": "Fastest",
+    }
+    label_lookup: dict[str, list[str]] = {}
+    score_lookup: dict[str, dict[str, float]] = {}
+    for pref, raw in recommendations_raw.items():
+        rname = raw["name"]
+        label_lookup.setdefault(rname, []).append(_LABEL_MAP.get(pref, pref.capitalize()))
+        # Collect per-preference scores from the raw dict
+        pscores = raw.get("preference_scores") or {}
+        score_lookup.setdefault(rname, {}).update(pscores)
+        if raw.get("suitability_score") is not None:
+            score_lookup[rname][pref] = float(raw["suitability_score"])
+
+    # Build de-duplicated flat route list (winners first, then remaining candidates)
+    seen: set[str] = set()
+    routes: list[JourneyOption] = []
+
+    # Add winners in a consistent order: cheapest → fastest → comfortable
+    for pref in all_preferences:
+        raw = recommendations_raw.get(pref)
+        if raw and raw["name"] not in seen:
+            seen.add(raw["name"])
+            opt = _to_option(raw)
+            opt.labels = label_lookup.get(raw["name"], [])
+            opt.scores = score_lookup.get(raw["name"])
+            routes.append(opt)
+
+    # Append remaining candidates (not already a winner) with their own scoring
+    for raw in candidate_routes_raw:
+        if raw["name"] not in seen:
+            seen.add(raw["name"])
+            opt = _to_option(raw)
+            opt.labels = label_lookup.get(raw["name"], [])
+            opt.scores = raw.get("preference_scores")
+            routes.append(opt)
+
     logger.info(
-        "Final recommendations returned prefs=%s candidates=%s",
-        list(recommendations.keys()),
-        len(candidate_routes),
+        "Final routes returned total=%s winners=%s",
+        len(routes),
+        len(recommendations_raw),
     )
 
     return {
@@ -123,8 +144,7 @@ def plan_journey_ml(request: MLJourneyRequest) -> dict[str, Any]:
             "latitude": destination["latitude"],
             "longitude": destination["longitude"],
         },
-        "recommendations": recommendations,
-        "candidate_routes": candidate_routes,
+        "routes": routes,
         "data_quality": quality,
         "provider_status": provider_status,
     }

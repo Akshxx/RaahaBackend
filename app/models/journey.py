@@ -30,9 +30,6 @@ class MLJourneyRequest(BaseModel):
 
     origin: str = Field(..., min_length=2)
     destination: str = Field(..., min_length=2)
-    preferences: List[Literal["fastest", "cheapest", "comfortable"]] = Field(
-        default_factory=lambda: ["cheapest", "comfortable", "fastest"]
-    )
     departure_time: Optional[str] = None
 
 
@@ -81,6 +78,9 @@ class JourneyOption(BaseModel):
     confidence: Optional[float] = None
     data_freshness: Optional[str] = None
     preference: Optional[str] = None
+    # New: scored labels (e.g. ["Cheapest", "Fastest"]) and per-dimension scores
+    labels: List[str] = Field(default_factory=list)
+    scores: Optional[Dict[str, float]] = None
 
 
 class JourneyResponse(BaseModel):
@@ -110,8 +110,7 @@ class MLJourneyResponse(BaseModel):
     destination: str
     origin_coordinates: Dict[str, float]
     destination_coordinates: Dict[str, float]
-    recommendations: Dict[str, JourneyOption]
-    candidate_routes: List[JourneyOption]
+    routes: List[JourneyOption]          # flat list; each route carries its labels + scores
     data_quality: Dict[str, Any]
     provider_status: Optional[Dict[str, Any]] = None
     ranking_layer: Optional[str] = None
